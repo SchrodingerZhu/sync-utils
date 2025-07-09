@@ -50,7 +50,7 @@ impl<T> LambdaLock<T> {
         let node = Node {
             raw: raw::Node::new(operate::<F, T, R>),
             closure: MaybeUninit::new(f),
-            data: NonNull::from_ref(unsafe { &mut *self.data.get() }),
+            data: unsafe { NonNull::new_unchecked(self.data.get()) },
             result: Cell::new(MaybeUninit::uninit()),
         };
         if node.raw.attach(&self.raw) {
@@ -92,7 +92,7 @@ mod tests {
     fn test_lambda_lock_add() {
         use super::LambdaLock;
         for _ in 0..100 {
-            let lock = LambdaLock::new(0);
+            let lock = LambdaLock::new(0usize);
             // 100 threads increment the value by 1 in 100 iterations
             std::thread::scope(|s| {
                 for _ in 0..100 {
