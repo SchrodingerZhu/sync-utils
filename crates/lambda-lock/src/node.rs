@@ -105,6 +105,8 @@ impl Node {
                 debug_assert_eq!(status, HEAD);
             },
             None => {
+                // we are going to be the head node.
+                // If exiting early, we should trigger the bomb to propagate the poison.
                 raw.acquire()?;
             }
         }
