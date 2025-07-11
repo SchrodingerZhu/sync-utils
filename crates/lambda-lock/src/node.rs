@@ -107,6 +107,15 @@ impl Node {
             None => {
                 // we are going to be the head node.
                 // If exiting early, we should trigger the bomb to propagate the poison.
+                // This is needed because of the following scenario:
+                // 1. Thread A graps the lock on fast path.
+                // 2. Thread B tries to grap the lock and enters the slow path, which
+                //    ends up spinning right here.
+                // 3. Thread C enters the queue and waiting for the lock.
+                // 4. Thread A panics, poisoning the lock.
+                // 5. Thread B wakes up only to find that the lock is poisoned.
+                // 6. Thread B needs to notify Thread C that the lock is poisoned.
+                // 7. Thread C needs to wake up and handle the poison.
                 raw.acquire()?;
             }
         }
