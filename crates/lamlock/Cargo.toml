@@ -8,3 +8,10 @@ nightly = []
 
 [dependencies]
 rustix = { version = "1.0.7", default-features = false, features = ["thread"] }
+
+[[bench]]
+name = "lamlock-bench"
+harness = false
+
+[dev-dependencies]
+criterion = "0.6.0"

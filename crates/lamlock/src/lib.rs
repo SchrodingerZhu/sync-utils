@@ -44,7 +44,7 @@ pub struct Lock<T> {
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T> Sync for Lock<T> {}
+unsafe impl<T: Send> Sync for Lock<T> {}
 
 impl<T> Lock<T> {
     /// Create a new lock with the given data.
@@ -61,6 +61,7 @@ impl<T> Lock<T> {
         self.raw.poison();
         Ok(())
     }
+
     #[inline(never)]
     fn run_slowly<F, R>(&self, f: F) -> LockResult<R>
     where
