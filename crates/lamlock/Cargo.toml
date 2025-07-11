@@ -1,5 +1,5 @@
 [package]
-name = "lambda-lock"
+name = "lamlock"
 version = "0.1.0"
 edition = "2024"
 
