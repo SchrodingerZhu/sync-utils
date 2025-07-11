@@ -4,144 +4,141 @@ use core::{
     cell::{Cell, UnsafeCell},
     mem::MaybeUninit,
     ptr::NonNull,
+    sync::atomic::Ordering,
 };
-mod raw;
 
-pub struct LambdaLock<T> {
-    raw: raw::LambdaLock,
+use crate::node::Node;
+mod bomb;
+mod futex;
+mod node;
+mod rawlock;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LockPoisoned;
+
+pub type LockResult<T> = Result<T, LockPoisoned>;
+
+impl core::fmt::Display for LockPoisoned {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Lock is poisoned")
+    }
+}
+
+impl core::error::Error for LockPoisoned {}
+
+pub struct Lock<T> {
+    raw: rawlock::RawLock,
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T> Sync for LambdaLock<T> {}
+unsafe impl<T> Sync for Lock<T> {}
 
-impl<T> LambdaLock<T> {
+impl<T> Lock<T> {
     pub const fn new(data: T) -> Self {
-        LambdaLock {
-            raw: raw::LambdaLock::new(),
+        Self {
+            raw: rawlock::RawLock::new(),
             data: UnsafeCell::new(data),
         }
     }
-
     #[inline(never)]
-    fn run_slow<F, R>(&self, f: F) -> Option<R>
+    fn run_slowly<F, R>(&self, f: F) -> LockResult<R>
     where
-        F: FnOnce(&mut T) -> R + Send + 'static,
-        R: Send + 'static,
+        F: FnOnce(&mut T) -> R,
+        R: Send,
     {
         #[repr(C)]
-        struct Node<F, T, R> {
-            raw: raw::Node,
+        struct CombinedNode<'a, T, F, R> {
+            node: UnsafeCell<Node>,
             closure: MaybeUninit<F>,
-            data: NonNull<T>,
+            data: &'a UnsafeCell<T>,
             result: Cell<MaybeUninit<R>>,
         }
-        unsafe fn operate<F, T, R>(node: NonNull<raw::Node>)
+        unsafe fn execute<T, F, R>(this: NonNull<Node>)
         where
             F: FnOnce(&mut T) -> R,
-            R: Send + 'static,
         {
-            let casted = node.cast::<Node<F, T, R>>();
-            let closure = unsafe { casted.as_ref().closure.assume_init_read() };
-            let result = closure(unsafe { &mut *casted.as_ref().data.as_ptr() });
-            unsafe {
-                casted.as_ref().result.set(MaybeUninit::new(result));
-            }
+            let this = this.cast::<CombinedNode<T, F, R>>();
+            let closure = unsafe { this.as_ref().closure.assume_init_read() };
+            let data = unsafe { &mut *this.as_ref().data.get() };
+            let result = (closure)(data);
+            unsafe { this.as_ref().result.set(MaybeUninit::new(result)) };
         }
-        let node = Node {
-            raw: raw::Node::new(operate::<F, T, R>),
+        let combined_node = CombinedNode {
+            node: UnsafeCell::new(Node::new(execute::<T, F, R>)),
             closure: MaybeUninit::new(f),
-            data: unsafe { NonNull::new_unchecked(self.data.get()) },
+            data: &self.data,
             result: Cell::new(MaybeUninit::uninit()),
         };
-        if node.raw.attach(&self.raw) {
-            Some(unsafe { node.result.into_inner().assume_init() })
-        } else {
-            None
-        }
+        let this = NonNull::from(&combined_node).cast();
+        Node::attach(this, &self.raw)?;
+        Ok(unsafe { combined_node.result.into_inner().assume_init() })
     }
 
     #[inline(always)]
-    pub fn run<F, R>(&self, f: F) -> Option<R>
+    pub fn run<F, R>(&self, f: F) -> LockResult<R>
     where
-        F: FnOnce(&mut T) -> R + Send + 'static,
-        R: Send + 'static,
+        F: FnOnce(&mut T) -> R,
+        R: Send,
     {
-        struct ReleaseGuard<'a> {
-            raw: &'a raw::LambdaLock,
+        if !self.raw.has_tail(Ordering::Relaxed) && self.raw.try_acquire()? {
+            let bomb = bomb::LightWeightBomb::new(&self.raw);
+            let result = f(unsafe { &mut *self.data.get() });
+            self.raw.release();
+            bomb.diffuse();
+            return Ok(result);
         }
-        impl<'a> Drop for ReleaseGuard<'a> {
-            fn drop(&mut self) {
-                self.raw.release();
-            }
-        }
-        if self.raw.try_lock()? {
-            let _guard = ReleaseGuard { raw: &self.raw };
-            let res = f(unsafe { &mut *self.data.get() });
-            Some(res)
-        } else {
-            self.run_slow(f)
-        }
+        self.run_slowly(f)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate alloc;
+    use super::*;
+
     extern crate std;
+
     #[test]
-    fn test_lambda_lock_add() {
-        use super::LambdaLock;
-        for _ in 0..100 {
-            let lock = LambdaLock::new(0usize);
-            // 100 threads increment the value by 1 in 100 iterations
-            std::thread::scope(|s| {
-                for _ in 0..100 {
-                    s.spawn(|| {
-                        for _ in 0..100 {
-                            lock.run(|data| {
-                                *data += 1;
-                            });
-                        }
-                    });
-                }
-            });
-            lock.run(|data| {
-                assert_eq!(*data, 10000);
-            });
-        }
+    fn smoke_test() {
+        let lock = Lock::new(0);
+        lock.run(|data| {
+            *data += 1;
+        })
+        .unwrap();
+        assert_eq!(lock.run(|x| *x).unwrap(), 1);
     }
+
     #[test]
-    fn test_string_concatenation() {
-        use super::LambdaLock;
-        for _ in 0..100 {
-            let lock = LambdaLock::new(alloc::string::String::new());
-            std::thread::scope(|s| {
-                for _ in 0..100 {
-                    s.spawn(|| {
-                        lock.run(|data| {
-                            data.push_str("A");
-                        });
-                    });
-                }
-            });
-            lock.run(|data| {
-                assert_eq!(data.len(), 100,);
-            });
-        }
+    fn multi_thread_test() {
+        let cnt = 100;
+        let lock = Lock::new(0);
+        std::thread::scope(|scope| {
+            for i in 0..cnt {
+                let lock = &lock;
+                scope.spawn(move || {
+                    lock.run(|data| {
+                        *data += cnt - i;
+                    })
+                    .unwrap();
+                });
+            }
+        });
+
+        assert_eq!(lock.run(|x| *x).unwrap(), cnt * (cnt + 1) / 2);
     }
 
     #[test]
     #[should_panic]
-    fn test_panic_001() {
-        use super::LambdaLock;
-        let lock = &LambdaLock::new(0);
-        std::thread::scope(|s| {
-            for i in 0..100 {
-                s.spawn(move || {
-                    lock.run(move |data| {
-                        *data += i;
-                        if i == 50 {
-                            panic!("Panic at {}", i);
+    fn mutli_thread_panic_chain_test() {
+        let cnt = 100;
+        let lock = Lock::new(0);
+        std::thread::scope(|scope| {
+            for i in 0..cnt {
+                let lock = &lock;
+                scope.spawn(move || {
+                    lock.run(|data| {
+                        *data += cnt - i;
+                        if i == cnt / 2 {
+                            panic!("panic chain");
                         }
                     })
                     .unwrap();
