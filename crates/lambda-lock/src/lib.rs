@@ -1,5 +1,6 @@
 #![no_std]
-
+#![cfg_attr(all(feature = "nightly", not(miri)), allow(internal_features))]
+#![cfg_attr(all(feature = "nightly", not(miri)), feature(core_intrinsics))]
 use core::{
     cell::{Cell, UnsafeCell},
     mem::MaybeUninit,

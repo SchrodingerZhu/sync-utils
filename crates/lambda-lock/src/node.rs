@@ -72,6 +72,12 @@ impl Node {
         }
     }
 
+    #[cfg(all(feature = "nightly", not(miri)))]
+    pub unsafe fn prefetch_next(&self, ordering: Ordering) {
+        let ptr = self.next.load(ordering);
+        unsafe { core::intrinsics::prefetch_write_data(ptr, 3) };
+    }
+
     /// Store the next node in the linked list.
     pub fn store_next(&self, next: NonNull<Self>) {
         self.next.store(next.as_ptr(), Ordering::Release);
@@ -121,6 +127,10 @@ impl Node {
         }
         let mut cursor = this;
         loop {
+            #[cfg(all(feature = "nightly", not(miri)))]
+            unsafe {
+                cursor.as_ref().prefetch_next(Ordering::Relaxed);
+            }
             unsafe {
                 (this.as_ref().closure)(cursor);
             }
