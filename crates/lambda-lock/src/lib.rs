@@ -49,7 +49,7 @@ impl<T> Lock<T> {
     {
         #[repr(C)]
         struct CombinedNode<'a, T, F, R> {
-            node: UnsafeCell<Node>,
+            node: Node,
             closure: MaybeUninit<F>,
             data: &'a UnsafeCell<T>,
             result: Cell<MaybeUninit<R>>,
@@ -65,7 +65,7 @@ impl<T> Lock<T> {
             unsafe { this.as_ref().result.set(MaybeUninit::new(result)) };
         }
         let combined_node = CombinedNode {
-            node: UnsafeCell::new(Node::new(execute::<T, F, R>)),
+            node: Node::new(execute::<T, F, R>),
             closure: MaybeUninit::new(f),
             data: &self.data,
             result: Cell::new(MaybeUninit::uninit()),
