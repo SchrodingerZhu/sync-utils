@@ -9,7 +9,7 @@ and runs them for other waiting threads.
 
 ## What is an MCS Lock?
 
-An MCS queue is a queue-based lock that is designed to be cache-friendly.
+An MCS lock is a queue-based lock that is designed to be cache-friendly.
 Each thread only spin on its local node, with minimal traffic across threads.
 The thread-local node is not nessarily a node inside TLS storage. Rather, the
 node can be allocated on stack. It is assumed that, during the lifespan of
