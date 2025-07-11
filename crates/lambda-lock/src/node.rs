@@ -125,7 +125,7 @@ impl Node {
 
         if raw.try_close(cursor) {
             unsafe {
-                cursor.as_ref().wake_as_head();
+                cursor.as_ref().wake_as_done();
             }
             raw.release();
             bomb.diffuse();
@@ -143,7 +143,10 @@ impl Node {
                     bomb.diffuse();
                     return Ok(());
                 },
-                None => continue,
+                None => {
+                    debug_assert!(raw.has_tail(Ordering::SeqCst));
+                    continue;
+                }
             }
         }
     }
