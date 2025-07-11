@@ -157,7 +157,7 @@ impl Node {
             // Relaxed ordering is okay since we are in a loop and will retry.
             // The next node is only shared with the next thread that will wake it up.
             // The write to the node will finally propagate to the current thread.
-            match unsafe { cursor.as_ref().load_next(Ordering::Relaxed) } {
+            match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
                 Some(next) => unsafe {
                     next.as_ref().wake_as_head();
                     cursor.as_ref().wake_as_done();
