@@ -43,7 +43,7 @@ impl<T> Lock<T> {
     #[inline(never)]
     fn run_slowly<F, R>(&self, f: F) -> LockResult<R>
     where
-        F: FnOnce(&mut T) -> R,
+        F: FnOnce(&mut T) -> R + Send,
         R: Send,
     {
         #[repr(C)]
@@ -77,7 +77,7 @@ impl<T> Lock<T> {
     #[inline(always)]
     pub fn run<F, R>(&self, f: F) -> LockResult<R>
     where
-        F: FnOnce(&mut T) -> R,
+        F: FnOnce(&mut T) -> R + Send,
         R: Send,
     {
         if !self.raw.has_tail(Ordering::Relaxed) && self.raw.try_acquire()? {
