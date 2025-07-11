@@ -4,6 +4,7 @@
 use core::{
     cell::{Cell, UnsafeCell},
     mem::MaybeUninit,
+    ops::ControlFlow,
     ptr::NonNull,
     sync::atomic::Ordering,
 };
@@ -17,6 +18,9 @@ mod rawlock;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LockPoisoned;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LockNotPoisoned;
+
 pub type LockResult<T> = Result<T, LockPoisoned>;
 
 impl core::fmt::Display for LockPoisoned {
@@ -27,6 +31,14 @@ impl core::fmt::Display for LockPoisoned {
 
 impl core::error::Error for LockPoisoned {}
 
+impl core::fmt::Display for LockNotPoisoned {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Lock is not poisoned")
+    }
+}
+
+impl core::error::Error for LockNotPoisoned {}
+
 pub struct Lock<T> {
     raw: rawlock::RawLock,
     data: UnsafeCell<T>,
@@ -35,11 +47,19 @@ pub struct Lock<T> {
 unsafe impl<T> Sync for Lock<T> {}
 
 impl<T> Lock<T> {
+    /// Create a new lock with the given data.
     pub const fn new(data: T) -> Self {
         Self {
             raw: rawlock::RawLock::new(),
             data: UnsafeCell::new(data),
         }
+    }
+    /// Wait until the lock is available, then poison it.
+    /// Return error if the lock is already poisoned.
+    pub fn posion(&self) -> Result<(), LockPoisoned> {
+        self.raw.acquire()?;
+        self.raw.poison();
+        Ok(())
     }
     #[inline(never)]
     fn run_slowly<F, R>(&self, f: F) -> LockResult<R>
@@ -75,6 +95,7 @@ impl<T> Lock<T> {
         Ok(unsafe { combined_node.result.into_inner().assume_init() })
     }
 
+    /// Schedules a closure to run on the lock's data.
     #[inline(always)]
     pub fn run<F, R>(&self, f: F) -> LockResult<R>
     where
@@ -89,6 +110,32 @@ impl<T> Lock<T> {
             return Ok(result);
         }
         self.run_slowly(f)
+    }
+    /// Try to inspect a posioned lock. If the input closure returns `ControlFlow::Continue`, the lock
+    /// continues to be poisoned and the result is returned. If it returns `ControlFlow::Break`, the lock
+    /// is released to normal state.
+    /// The function itself returns a ``Result<R, LockNotPoisoned>`, where `R` is the type of the result returned by the closure.
+    /// If the lock is not poisoned when trying to acquire it as a poisoned lock, it returns `LockNotPoisoned`.
+    pub fn inspect_poison<F, R>(&self, f: F) -> Result<R, LockNotPoisoned>
+    where
+        F: FnOnce(&mut T) -> ControlFlow<R, R>,
+    {
+        self.raw.acquire_poison()?;
+        match f(unsafe { &mut *self.data.get() }) {
+            ControlFlow::Continue(result) => {
+                self.raw.poison();
+                Ok(result)
+            }
+            ControlFlow::Break(result) => {
+                self.raw.release();
+                Ok(result)
+            }
+        }
+    }
+
+    /// Unpoison the lock if it is poisoned.
+    pub fn unpoison(&self) -> Result<(), LockNotPoisoned> {
+        self.inspect_poison(|_| ControlFlow::Break(()))
     }
 }
 
@@ -145,6 +192,34 @@ mod tests {
                     .unwrap();
                 });
             }
+        });
+    }
+
+    #[test]
+    fn multi_thread_inspect_poison() {
+        let lock = Lock::new(std::string::String::new());
+        std::thread::scope(|scope| {
+            lock.posion().unwrap();
+            lock.inspect_poison(|_| ControlFlow::Break(())).unwrap();
+            lock.posion().unwrap();
+            let mut handles = std::vec::Vec::new();
+            for _ in 0..100 {
+                let lock = &lock;
+                handles.push(scope.spawn(move || {
+                    if lock.run(|x| x.push('A')).is_err() {
+                        lock.inspect_poison(|x| {
+                            x.push('A');
+                            ControlFlow::Break(())
+                        })
+                        .unwrap();
+                    }
+                }));
+            }
+            for handle in handles {
+                handle.join().unwrap();
+            }
+            assert_eq!(lock.run(|x| x.len()).unwrap(), 100);
+            assert_eq!(lock.run(|x| x.chars().all(|c| c == 'A')).unwrap(), true);
         });
     }
 }

@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicPtr, AtomicU32, Ordering},
 };
 
-use crate::{LockPoisoned, LockResult, node::Node};
+use crate::{LockNotPoisoned, LockPoisoned, LockResult, node::Node};
 
 const UNLOCKED: u32 = 0;
 const LOCKED: u32 = 1;
@@ -70,6 +70,24 @@ impl RawLock {
                     }
                 }
                 Err(_) => return Err(LockPoisoned),
+            }
+        }
+    }
+    pub fn acquire_poison(&self) -> Result<(), LockNotPoisoned> {
+        loop {
+            match self.status.compare_exchange(
+                POISONED,
+                LOCKED,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(LOCKED) => {
+                    while self.status.load(Ordering::Relaxed) == LOCKED {
+                        core::hint::spin_loop();
+                    }
+                }
+                Err(_) => return Err(LockNotPoisoned),
             }
         }
     }
