@@ -108,6 +108,22 @@ fn initialization<T: Schedule<HashMap<String, String>>>() {
     });
 }
 
+fn integer_add_bench_bad<T: Schedule<i32>>() {
+    let lock = T::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..128 {
+            let lock = &lock;
+            scope.spawn(move || {
+                for i in 0..1000 {
+                    lock.schedule(|data| {
+                        *data += i;
+                    });
+                }
+            });
+        }
+    });
+}
+
 pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("integer add (lamlock)", |b| {
         b.iter(integer_add_bench::<Lock<i32>>)
@@ -139,6 +155,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("initialization (mutex)", |b| {
         b.iter(initialization::<Mutex<HashMap<String, String>>>)
+    });
+
+    c.bench_function("integer add bad (lamlock)", |b| {
+        b.iter(integer_add_bench_bad::<Lock<i32>>)
+    });
+    c.bench_function("integer add bad (mutex)", |b| {
+        b.iter(integer_add_bench_bad::<Mutex<i32>>)
     });
 }
 
