@@ -84,7 +84,8 @@ Enabling the `nightly` feature (which does node prefetching) and LTO can further
 Here’s an example where `lamlock` performs poorly:
 
 ```rust
-fn integer_add_bench_bad<T: Schedule<i32>>() {
+fn integer_add_bench_bad() {
+    use lamlock::Lock; 
     let lock = Lock::new(0);
     std::thread::scope(|scope| {
         for _ in 0..128 {
