@@ -1,6 +1,7 @@
 #![no_std]
 #![cfg_attr(all(feature = "nightly", not(miri)), allow(internal_features))]
 #![cfg_attr(all(feature = "nightly", not(miri)), feature(core_intrinsics))]
+#![doc = include_str!("../README.md")]
 use core::{
     cell::{Cell, UnsafeCell},
     mem::MaybeUninit,
@@ -41,6 +42,9 @@ impl core::fmt::Display for LockNotPoisoned {
 
 impl core::error::Error for LockNotPoisoned {}
 
+/// The `Lock` struct is a thread-safe, poisonable lock that allows for safe concurrent access to data.
+/// Create a new `Lock` with the [`Lock::new`] method.
+/// To get access to the data, you can use the [`Lock::run`] method.
 pub struct Lock<T> {
     raw: rawlock::RawLock,
     data: UnsafeCell<T>,
@@ -126,11 +130,11 @@ impl<T> Lock<T> {
         self.run_slowly(f)
     }
 
-    /// Try to inspect a poisoned lock. If the input closure returns `ControlFlow::Continue`, the lock
-    /// continues to be poisoned and the result is returned. If it returns `ControlFlow::Break`, the lock
+    /// Try to inspect a poisoned lock. If the input closure returns [`ControlFlow::Continue`], the lock
+    /// continues to be poisoned and the result is returned. If it returns [`ControlFlow::Break`], the lock
     /// is released to normal state.
-    /// The function itself returns a ``Result<R, LockNotPoisoned>`, where `R` is the type of the result returned by the closure.
-    /// If the lock is not poisoned when trying to acquire it as a poisoned lock, it returns `LockNotPoisoned`.
+    /// The function itself returns a [`Result<R, LockNotPoisoned>`], where `R` is the type of the result returned by the closure.
+    /// If the lock is not poisoned when trying to acquire it as a poisoned lock, it returns [`LockNotPoisoned`].
     /// ```rust
     /// use lamlock::Lock;
     /// use std::ops::ControlFlow;
@@ -158,7 +162,7 @@ impl<T> Lock<T> {
     }
 
     /// Unpoison the lock if it is poisoned.
-    /// This is the same of calling `inspect_poison` with a closure that returns `ControlFlow::Break(())`.
+    /// This is the same of calling [`Lock::inspect_poison`] with a closure that returns [`ControlFlow::Break`] with unit type.
     pub fn unpoison(&self) -> Result<(), LockNotPoisoned> {
         self.inspect_poison(|_| ControlFlow::Break(()))
     }

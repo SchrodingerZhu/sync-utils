@@ -11,7 +11,7 @@
 An MCS lock is a queue-based lock designed to be cache-friendly. Each thread spins only on its local node, minimizing cache traffic between threads.  
 The thread-local node does not need to live in thread-local storage — it can be stack-allocated. This works because, while the node is alive, the thread is actively blocked in the lock routine, so its stack frame is valid.
 
-```
+```text
  ┌──────┐        ┌────────────────────┐      ┌────────────────────┐
  │ Tail │        │  Thread 1 (Stack)  │      │  Thread 2 (Stack)  │
  └──┬───┘        ├────────────────────┤      ├────────────────────┤
@@ -59,7 +59,7 @@ It depends. Large, realistic benchmarks are still in progress. A similar flat-co
 
 Early microbenchmarks suggest `lamlock` can match or outperform a standard mutex in some cases:
 
-```
+```text
 integer add (lamlock)   time:   [2.1744 ms 2.1947 ms 2.2163 ms]
 integer add (mutex)     time:   [2.2152 ms 2.2356 ms 2.2575 ms]
 
@@ -102,7 +102,7 @@ fn integer_add_bench_bad<T: Schedule<i32>>() {
 ```
 
 Results:
-```
+```text
 integer add bad (lamlock) time:   [8.7588 ms 10.712 ms 12.721 ms]
 integer add bad (mutex)   time:   [3.1807 ms 3.2499 ms 3.3180 ms]
 ```
