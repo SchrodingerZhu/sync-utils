@@ -15,9 +15,11 @@ mod futex;
 mod node;
 mod rawlock;
 
+/// Error type for when a lock is poisoned.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LockPoisoned;
 
+/// Error type for when a lock is expected to be poisoned but is not.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LockNotPoisoned;
 
@@ -56,7 +58,7 @@ impl<T> Lock<T> {
     }
     /// Wait until the lock is available, then poison it.
     /// Return error if the lock is already poisoned.
-    pub fn posion(&self) -> Result<(), LockPoisoned> {
+    pub fn poison(&self) -> Result<(), LockPoisoned> {
         self.raw.acquire()?;
         self.raw.poison();
         Ok(())
@@ -97,6 +99,17 @@ impl<T> Lock<T> {
     }
 
     /// Schedules a closure to run on the lock's data.
+    /// The locking strategy splits into two paths:
+    /// 1. If the lock is not poisoned and can be acquired immediately, it runs the closure directly.
+    ///    On the fast path, the closure is not spilled into the node.
+    /// 2. If the lock is poisoned or cannot be acquired immediately, it schedules the closure to run later.
+    /// ```rust
+    /// use lamlock::Lock;
+    /// let lock = Lock::new(0);
+    /// lock.run(|data| {
+    ///   *data += 1;
+    /// }).unwrap();
+    /// ```
     #[inline(always)]
     pub fn run<F, R>(&self, f: F) -> LockResult<R>
     where
@@ -112,11 +125,21 @@ impl<T> Lock<T> {
         }
         self.run_slowly(f)
     }
-    /// Try to inspect a posioned lock. If the input closure returns `ControlFlow::Continue`, the lock
+
+    /// Try to inspect a poisoned lock. If the input closure returns `ControlFlow::Continue`, the lock
     /// continues to be poisoned and the result is returned. If it returns `ControlFlow::Break`, the lock
     /// is released to normal state.
     /// The function itself returns a ``Result<R, LockNotPoisoned>`, where `R` is the type of the result returned by the closure.
     /// If the lock is not poisoned when trying to acquire it as a poisoned lock, it returns `LockNotPoisoned`.
+    /// ```rust
+    /// use lamlock::Lock;
+    /// use std::ops::ControlFlow;
+    /// let lock = Lock::new(0);
+    /// lock.poison().unwrap();
+    /// assert!(lock.run(|_| ()).is_err());
+    /// lock.inspect_poison(|_| ControlFlow::Break(()));
+    /// assert!(lock.run(|_| ()).is_ok());
+    /// ```
     pub fn inspect_poison<F, R>(&self, f: F) -> Result<R, LockNotPoisoned>
     where
         F: FnOnce(&mut T) -> ControlFlow<R, R>,
@@ -135,6 +158,7 @@ impl<T> Lock<T> {
     }
 
     /// Unpoison the lock if it is poisoned.
+    /// This is the same of calling `inspect_poison` with a closure that returns `ControlFlow::Break(())`.
     pub fn unpoison(&self) -> Result<(), LockNotPoisoned> {
         self.inspect_poison(|_| ControlFlow::Break(()))
     }
@@ -200,9 +224,9 @@ mod tests {
     fn multi_thread_inspect_poison() {
         let lock = Lock::new(std::string::String::new());
         std::thread::scope(|scope| {
-            lock.posion().unwrap();
+            lock.poison().unwrap();
             lock.inspect_poison(|_| ControlFlow::Break(())).unwrap();
-            lock.posion().unwrap();
+            lock.poison().unwrap();
             let mut handles = std::vec::Vec::new();
             for _ in 0..100 {
                 let lock = &lock;
