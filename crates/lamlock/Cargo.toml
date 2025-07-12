@@ -2,6 +2,14 @@
 name = "lamlock"
 version = "0.1.0"
 edition = "2024"
+authors = ["schrodingerzhu <yifanzhu@rochester.edu>"]
+description = "MCS-style flat-combining mutex with panic-awareness"
+license = "MIT OR Apache-2.0"
+keywords = ["mutex", "MCS", "flat-combining", "synchronization"]
+categories = ["concurrency", "data-structures", "no-std"]
+homepage = "https://github.com/schrodingerzhu/useless"
+repository = "https://github.com/schrodingerzhu/useless"
+readme = "README.md"
 
 [features]
 nightly = []
