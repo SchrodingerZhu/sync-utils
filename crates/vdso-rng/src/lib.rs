@@ -3,13 +3,16 @@ extern crate alloc;
 mod auxv;
 mod pool;
 mod vdso;
+use crate::pool::State;
+use core::ffi::c_uint;
+use linux_raw_sys::errno;
+pub use pool::SharedPool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     PoolPoisoned,
     NotSupported,
     AllocationFailure,
-    Reentrancy,
     Errno(i32),
 }
 
@@ -18,7 +21,6 @@ impl core::fmt::Display for Error {
         match self {
             Error::NotSupported => write!(f, "Operation not supported on this platform"),
             Error::AllocationFailure => write!(f, "Failed to allocate memory"),
-            Error::Reentrancy => write!(f, "Reentrant call detected"),
             Error::Errno(e) => write!(f, "System call failed with error code: {e}"),
             Error::PoolPoisoned => write!(f, "Memory pool has been poisoned"),
         }
@@ -26,12 +28,6 @@ impl core::fmt::Display for Error {
 }
 
 impl core::error::Error for Error {}
-
-use core::ffi::c_uint;
-
-pub use pool::SharedPool;
-
-use crate::pool::State;
 
 pub struct LocalState<'a> {
     state: State,
@@ -46,8 +42,25 @@ impl<'a> LocalState<'a> {
             .map_err(|_| Error::PoolPoisoned)??;
         Ok(Self { state, pool })
     }
-    pub fn fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
-        self.state.fill(buf, flag)
+    pub fn try_fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
+        self.state.try_fill(buf, flag)
+    }
+    pub fn fill(&mut self, mut buf: &mut [u8], flag: c_uint) -> Result<(), Error> {
+        while !buf.is_empty() {
+            match self.try_fill(buf, flag) {
+                Ok(filled) => {
+                    buf = &mut buf[filled..];
+                    continue;
+                }
+                Err(Error::Errno(e)) if e == errno::EAGAIN as i32 || e == errno::EINTR as i32 => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -140,7 +153,7 @@ mod tests {
             });
             &GLOBAL_STATE
         }
-        fn fill(buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
+        fn fill(buf: &mut [u8], flag: c_uint) -> Result<(), Error> {
             thread_local! {
                 static LOCAL_STATE: LazyCell<RefCell<LocalState<'static>>> = LazyCell::new(|| {
                     RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"))

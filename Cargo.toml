@@ -5,3 +5,4 @@ members = ["crates/lamlock", "crates/vdso-rng"]
 [profile.bench]
 opt-level = 3
 lto = true
+debug = true

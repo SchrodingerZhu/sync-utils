@@ -7,7 +7,6 @@ use core::{
     mem::MaybeUninit,
     num::NonZero,
     ptr::NonNull,
-    sync::atomic::Ordering,
 };
 use lamlock::Lock;
 use std::pin::Pin;
@@ -206,18 +205,12 @@ pub struct State {
     state: NonNull<c_void>,
     size: usize,
     function: VdsoFunc,
-    in_flight: bool,
 }
 
 unsafe impl Send for State {}
 
 impl State {
-    pub fn fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
-        if self.in_flight {
-            return Err(Error::Reentrancy);
-        }
-        self.in_flight = true;
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    pub fn try_fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
         let res = unsafe {
             (self.function)(
                 buf.as_mut_ptr() as *mut c_void,
@@ -227,8 +220,6 @@ impl State {
                 self.size,
             )
         };
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        self.in_flight = false;
         if res < 0 {
             return Err(Error::Errno(-res));
         }
@@ -326,7 +317,6 @@ impl Pool {
         Ok(State {
             state: free_state,
             function: self.config.function,
-            in_flight: false,
             size: self.config.params.size_of_opaque_states as usize,
         })
     }
