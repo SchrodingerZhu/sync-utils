@@ -8,26 +8,7 @@ use core::{
     mem::MaybeUninit,
     ptr::NonNull,
 };
-#[cfg(not(miri))]
-use rustix_futex_sync::Mutex;
-
-#[cfg(miri)]
-mod mutex {
-    extern crate std;
-
-    pub struct Mutex<T>(std::sync::Mutex<T>);
-    impl<T> Mutex<T> {
-        pub fn new(data: T) -> Self {
-            Self(std::sync::Mutex::new(data))
-        }
-        pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
-            self.0.lock().unwrap()
-        }
-    }
-}
-
-#[cfg(miri)]
-use mutex::Mutex;
+use lamlock::Lock;
 
 /// This is available in [`linux-raw-sys`]. However, to allow us attempt to use it with unsupported kernels,
 /// we define it here.
@@ -316,12 +297,12 @@ impl Pool {
     }
 }
 
-pub struct SharedPool(pub(crate) Mutex<Pool>);
+pub struct SharedPool(pub(crate) Lock<Pool>);
 
 impl SharedPool {
     pub fn new() -> Result<Self, Error> {
         let pool = Pool::new()?;
-        let lock = Mutex::new(pool);
+        let lock = Lock::new(pool);
         Ok(Self(lock))
     }
 }

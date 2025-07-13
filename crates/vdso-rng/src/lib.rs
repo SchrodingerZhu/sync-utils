@@ -14,6 +14,7 @@ pub use pool::SharedPool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
+    PoolPoisoned,
     NotSupported,
     AllocationFailure,
     Errno(i32),
@@ -25,6 +26,7 @@ impl core::fmt::Display for Error {
             Error::NotSupported => write!(f, "Operation not supported on this platform"),
             Error::AllocationFailure => write!(f, "Failed to allocate memory"),
             Error::Errno(e) => write!(f, "System call failed with error code: {e}"),
+            Error::PoolPoisoned => write!(f, "Memory pool has been poisoned"),
         }
     }
 }
@@ -38,7 +40,7 @@ pub struct LocalState<'a> {
 
 impl<'a> LocalState<'a> {
     pub fn new(pool: &'a SharedPool) -> Result<Self, Error> {
-        let state = pool.0.lock().get()?;
+        let state = pool.0.run(|x| x.get()).map_err(|_| Error::PoolPoisoned)??;
         Ok(Self { state, pool })
     }
     pub fn try_fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
@@ -66,7 +68,10 @@ impl<'a> LocalState<'a> {
 impl<'a> Drop for LocalState<'a> {
     fn drop(&mut self) {
         let state = self.state;
-        self.pool.0.lock().recycle(state);
+        self.pool
+            .0
+            .run(move |x| x.recycle(state))
+            .expect("Failed to recycle local state");
     }
 }
 

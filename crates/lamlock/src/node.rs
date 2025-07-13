@@ -36,7 +36,8 @@ impl Node {
             .compare_exchange(WAITING, SLEEPING, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => {
-                self.futex.wait(SLEEPING);
+                let futex = NonNull::from(&self.futex);
+                futex::Futex::wait(futex, SLEEPING);
                 self.futex.load(Ordering::Acquire)
             }
             Err(value) => value,
@@ -44,22 +45,23 @@ impl Node {
     }
 
     /// Wakes up the futex with a message.
-    fn wake(&self, message: u32) {
-        self.futex.notify(message, SLEEPING);
+    fn wake(this: NonNull<Self>, message: u32) {
+        let mutex = unsafe { NonNull::from(&this.as_ref().futex) };
+        futex::Futex::notify(mutex, message, SLEEPING);
     }
 
     /// Wake up the futex with `DONE` message.
-    pub fn wake_as_done(&self) {
-        self.wake(DONE);
+    pub fn wake_as_done(this: NonNull<Self>) {
+        Self::wake(this, DONE);
     }
     /// Wake up the futex with `HEAD` message.
-    pub fn wake_as_head(&self) {
-        self.wake(HEAD);
+    pub fn wake_as_head(this: NonNull<Self>) {
+        Self::wake(this, HEAD);
     }
 
     /// Wake up the futex with `POISONED` message.
-    pub fn wake_as_poisoned(&self) {
-        self.wake(POISONED);
+    pub fn wake_as_poisoned(this: NonNull<Self>) {
+        Self::wake(this, POISONED);
     }
 
     /// Get the successor node.
@@ -136,7 +138,7 @@ impl Node {
             }
             match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
                 Some(next) => {
-                    unsafe { cursor.as_ref().wake_as_done() };
+                    Node::wake_as_done(cursor);
                     cursor = next;
                     bomb.reset(cursor);
                 }
@@ -145,9 +147,8 @@ impl Node {
         }
 
         if raw.try_close(cursor) {
-            unsafe {
-                cursor.as_ref().wake_as_done();
-            }
+            Node::wake_as_done(cursor);
+
             raw.release();
             bomb.diffuse();
             return Ok(());
@@ -155,12 +156,12 @@ impl Node {
 
         loop {
             match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
-                Some(next) => unsafe {
-                    next.as_ref().wake_as_head();
-                    cursor.as_ref().wake_as_done();
+                Some(next) => {
+                    Node::wake_as_head(next);
+                    Node::wake_as_done(cursor);
                     bomb.diffuse();
                     return Ok(());
-                },
+                }
                 None => {
                     debug_assert!(raw.has_tail(Ordering::SeqCst));
                     continue;
@@ -188,7 +189,7 @@ mod tests {
                     assert_eq!(result, HEAD);
                 });
             }
-            node.wake(HEAD);
+            Node::wake((&node).into(), HEAD);
         })
     }
 
@@ -207,7 +208,7 @@ mod tests {
             loop {
                 match node.load_next(Ordering::Acquire) {
                     Some(next) => {
-                        unsafe { next.as_ref().wake(DONE) };
+                        Node::wake(next, DONE);
                         break;
                     }
                     None => core::hint::spin_loop(),

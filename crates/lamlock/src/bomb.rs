@@ -42,17 +42,13 @@ impl<'a> Drop for HeavyWeightBomb<'a> {
             let next = unsafe { self.atom.as_ref().load_next(Ordering::Acquire) };
             // If the next node is not null, we wake it up and continue to the next iteration.
             if let Some(next) = next {
-                unsafe {
-                    self.atom.as_ref().wake_as_poisoned();
-                }
+                Node::wake_as_poisoned(self.atom);
                 self.atom = next;
                 continue;
             }
             // If we successfully closed the tail, we can stop after waking the last node.
             if self.ignitor.get_raw().try_close(self.atom) {
-                unsafe {
-                    self.atom.as_ref().wake_as_poisoned();
-                }
+                Node::wake_as_poisoned(self.atom);
                 break;
             }
             // Otherwise, we know that the next will be updated since there are nodes waiting.

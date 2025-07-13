@@ -578,6 +578,7 @@ name = "vdso-rng"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "lamlock",
  "linux-raw-sys 0.10.0",
  "rand",
  "rayon",
