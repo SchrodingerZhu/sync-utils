@@ -1,5 +1,6 @@
 use crate::{Error, vdso::VdsoFunc};
 use alloc::boxed::Box;
+use core::pin::Pin;
 use core::{
     alloc::Layout,
     cell::Cell,
@@ -9,7 +10,6 @@ use core::{
     ptr::NonNull,
 };
 use lamlock::Lock;
-use std::pin::Pin;
 use syscalls::{Sysno, raw_syscall};
 
 /// This is available in [`linux-raw-sys`]. However, to allow us attempt to use it with unsupported kernels,

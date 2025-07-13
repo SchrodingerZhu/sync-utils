@@ -1,3 +1,4 @@
+#![no_std]
 extern crate alloc;
 
 mod auxv;
@@ -76,7 +77,10 @@ impl<'a> Drop for LocalState<'a> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use std::cell::{LazyCell, RefCell};
+
+    use alloc::vec::Vec;
 
     use super::*;
     #[test]
@@ -154,7 +158,7 @@ mod tests {
             &GLOBAL_STATE
         }
         fn fill(buf: &mut [u8], flag: c_uint) -> Result<(), Error> {
-            thread_local! {
+            std::thread_local! {
                 static LOCAL_STATE: LazyCell<RefCell<LocalState<'static>>> = LazyCell::new(|| {
                     RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"))
                 });
