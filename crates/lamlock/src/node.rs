@@ -132,7 +132,7 @@ impl Node {
                 cursor.as_ref().prefetch_next(Ordering::Relaxed);
             }
             unsafe {
-                (this.as_ref().closure)(cursor);
+                (cursor.as_ref().closure)(cursor);
             }
             match unsafe { cursor.as_ref().load_next(Ordering::Acquire) } {
                 Some(next) => {

@@ -1,3 +1,5 @@
+use crate::{Error, vdso::VdsoFunc};
+use alloc::boxed::Box;
 use core::{
     alloc::Layout,
     cell::Cell,
@@ -7,12 +9,9 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-
-use alloc::boxed::Box;
-use lamlock::Lock;
+use rustix_futex_sync::Mutex;
+use std::pin::Pin;
 use syscalls::{Sysno, raw_syscall};
-
-use crate::{Error, vdso::VdsoFunc};
 
 /// This is available in [`linux-raw-sys`]. However, to allow us attempt to use it with unsupported kernels,
 /// we define it here.
@@ -191,6 +190,7 @@ impl Config {
                     counter += 1;
                 }
             }
+            debug_assert!(counter == appendix.len());
             let header_ref = header.as_ref().assume_init_ref();
             header_ref.next.get().as_ref().prev.set(header_ref.into());
             header_ref.prev.get().as_ref().next.set(header_ref.into());
@@ -237,11 +237,23 @@ impl State {
 }
 
 pub struct Pool {
-    config: Config,
     sentinel: BlockHeader,
     cursor: NonNull<BlockHeader>,
     free_count: usize,
+    config: Config,
 }
+
+pub struct BoxedPool(Box<Pool>);
+impl BoxedPool {
+    pub fn new() -> Result<Self, Error> {
+        let pool = Pool::new()?;
+        Ok(Self(pool))
+    }
+    pub fn pin_mut(&mut self) -> Pin<&mut Pool> {
+        Pin::new(&mut self.0)
+    }
+}
+unsafe impl Send for BoxedPool {}
 
 impl Drop for Pool {
     fn drop(&mut self) {
@@ -334,28 +346,35 @@ impl Pool {
     }
 }
 
-#[repr(transparent)]
-pub struct SharedPool(pub(crate) Lock<Box<Pool>>);
+pub struct SharedPool(pub(crate) Mutex<BoxedPool>);
 
 impl SharedPool {
     pub fn new() -> Result<Self, Error> {
-        Ok(Self(Lock::new(Pool::new()?)))
+        let pool = BoxedPool::new()?;
+        let mutex = Mutex::new(pool);
+        Ok(Self(mutex))
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
     extern crate std;
 
     #[test]
     fn test_guess_cpu_count() {
+        if cfg!(miri) {
+            return;
+        }
         let count = guess_cpu_count();
         assert_eq!(std::thread::available_parallelism().unwrap(), count);
     }
 
     #[test]
     fn test_config_new() {
+        if cfg!(miri) {
+            return;
+        }
         let config = Config::new().expect("Failed to create Config");
         std::println!("{config:?}");
         assert!(config.page_size > 0, "Page size should be greater than 0");

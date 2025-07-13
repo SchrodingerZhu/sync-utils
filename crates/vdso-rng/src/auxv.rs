@@ -88,19 +88,25 @@ impl Drop for MMappedAuxv {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use linux_raw_sys::general::AT_RANDOM;
 
     use super::*;
     #[test]
     fn test_mmap_auxv() {
+        if cfg!(miri) {
+            return;
+        }
         let auxv = MMappedAuxv::new();
         assert!(auxv.is_some(), "Failed to mmap auxiliary vector");
     }
 
     #[test]
     fn test_auxv_iter() {
+        if cfg!(miri) {
+            return;
+        }
         let auxv = MMappedAuxv::new().expect("Failed to mmap auxiliary vector");
         assert!(
             auxv.iter().any(|x| x.key == AT_RANDOM as c_ulong),

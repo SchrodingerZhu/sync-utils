@@ -254,12 +254,15 @@ pub fn get_function_and_page_size() -> Option<(VdsoFunc, usize)> {
     Some((func?, page_size?))
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_get_function() {
+        if cfg!(miri) {
+            return;
+        }
         let (_func, page_size) =
             get_function_and_page_size().expect("Failed to get VDSO function and page size");
         assert!(page_size > 0, "Page size should be greater than 0");
