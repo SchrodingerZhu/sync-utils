@@ -6,6 +6,7 @@ mod vdso;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
+    PoolPoisoned,
     NotSupported,
     AllocationFailure,
     Reentrancy,
@@ -19,6 +20,7 @@ impl core::fmt::Display for Error {
             Error::AllocationFailure => write!(f, "Failed to allocate memory"),
             Error::Reentrancy => write!(f, "Reentrant call detected"),
             Error::Errno(e) => write!(f, "System call failed with error code: {e}"),
+            Error::PoolPoisoned => write!(f, "Memory pool has been poisoned"),
         }
     }
 }
@@ -38,7 +40,10 @@ pub struct LocalState<'a> {
 
 impl<'a> LocalState<'a> {
     pub fn new(pool: &'a SharedPool) -> Result<Self, Error> {
-        let state = pool.0.lock().pin_mut().get()?;
+        let state = pool
+            .0
+            .run(|x| x.pin_mut().get())
+            .map_err(|_| Error::PoolPoisoned)??;
         Ok(Self { state, pool })
     }
     pub fn fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
@@ -49,7 +54,10 @@ impl<'a> LocalState<'a> {
 impl<'a> Drop for LocalState<'a> {
     fn drop(&mut self) {
         let state = self.state;
-        self.pool.0.lock().pin_mut().recycle(state);
+        self.pool
+            .0
+            .run(move |x| x.pin_mut().recycle(state))
+            .expect("Failed to recycle local state");
     }
 }
 

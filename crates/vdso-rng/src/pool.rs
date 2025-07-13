@@ -9,7 +9,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use rustix_futex_sync::Mutex;
+use lamlock::Lock;
 use std::pin::Pin;
 use syscalls::{Sysno, raw_syscall};
 
@@ -346,13 +346,13 @@ impl Pool {
     }
 }
 
-pub struct SharedPool(pub(crate) Mutex<BoxedPool>);
+pub struct SharedPool(pub(crate) Lock<BoxedPool>);
 
 impl SharedPool {
     pub fn new() -> Result<Self, Error> {
         let pool = BoxedPool::new()?;
-        let mutex = Mutex::new(pool);
-        Ok(Self(mutex))
+        let lock = Lock::new(pool);
+        Ok(Self(lock))
     }
 }
 
