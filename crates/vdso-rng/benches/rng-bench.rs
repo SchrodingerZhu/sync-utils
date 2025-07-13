@@ -1,6 +1,7 @@
 use std::cell::{LazyCell, RefCell};
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use vdso_rng::{LocalState, SharedPool};
 
 fn global_pool() -> &'static SharedPool {
@@ -73,9 +74,35 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.finish();
     }
     {
-        // const TOTAL_CHUNKS: usize = 16384;
-        // const CHUNK_SIZE: usize = 256; // 256 bytes
-        // let mut array_of
+        const TOTAL_CHUNKS: usize = 1024 * 1024 * 8;
+        const CHUNK_SIZE: usize = 8;
+        let mut array_of_chunks = vec![[0u8; CHUNK_SIZE]; TOTAL_CHUNKS];
+        let mut group = c.benchmark_group("rayon");
+        group.bench_function("parallel-fill-1024bytes-vgetrandom", |b| {
+            b.iter(|| {
+                array_of_chunks.par_iter_mut().for_each(|chunk| {
+                    fill_vgetrandom(chunk);
+                });
+            });
+        });
+        group.bench_function("parallel-fill-1024bytes-getrandom", |b| {
+            b.iter(|| {
+                array_of_chunks.par_iter_mut().for_each(|chunk| {
+                    fill_getrandom(chunk);
+                });
+            });
+        });
+        group.bench_function("parallel-fill-1024bytes-thread_rng", |b| {
+            b.iter(|| {
+                array_of_chunks.par_iter_mut().for_each(|chunk| {
+                    fill_with_thread_rng(chunk);
+                });
+            });
+        });
+        group.throughput(criterion::Throughput::Bytes(
+            (TOTAL_CHUNKS * CHUNK_SIZE) as u64,
+        ));
+        group.finish();
     }
 }
 

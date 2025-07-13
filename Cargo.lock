@@ -555,6 +555,7 @@ dependencies = [
  "lamlock",
  "linux-raw-sys 0.10.0",
  "rand",
+ "rayon",
  "rustix",
  "syscalls",
 ]
