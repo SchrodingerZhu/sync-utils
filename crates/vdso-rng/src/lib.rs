@@ -3,14 +3,15 @@ extern crate alloc;
 
 #[cfg(not(miri))]
 mod auxv;
+mod config;
 mod pool;
 mod utils;
 #[cfg_attr(miri, path = "vdso_miri.rs")]
 mod vdso;
-use crate::pool::State;
 use core::ffi::c_uint;
 use linux_raw_sys::errno;
-pub use pool::SharedPool;
+pub use pool::Pool;
+use pool::Ptr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -34,17 +35,33 @@ impl core::fmt::Display for Error {
 impl core::error::Error for Error {}
 
 pub struct LocalState<'a> {
-    state: State,
-    pool: &'a SharedPool,
+    state: Ptr,
+    pool: &'a Pool,
 }
 
 impl<'a> LocalState<'a> {
-    pub fn new(pool: &'a SharedPool) -> Result<Self, Error> {
-        let state = pool.0.run(|x| x.get()).map_err(|_| Error::PoolPoisoned)??;
+    pub fn new(pool: &'a Pool) -> Result<Self, Error> {
+        let state = pool.get()?;
         Ok(Self { state, pool })
     }
     pub fn try_fill(&mut self, buf: &mut [u8], flag: c_uint) -> Result<usize, Error> {
-        self.state.try_fill(buf, flag)
+        let function = self.pool.config.function;
+        let state = self.state.0.as_ptr();
+        let state_length = self.pool.config.params.size_of_opaque_states as usize;
+        let buffer_len = buf.len();
+        unsafe {
+            let result = function(
+                buf.as_mut_ptr() as *mut _,
+                buffer_len,
+                flag,
+                state,
+                state_length,
+            );
+            if result < 0 {
+                return Err(Error::Errno(-result));
+            }
+            Ok(result as usize)
+        }
     }
     pub fn fill(&mut self, mut buf: &mut [u8], flag: c_uint) -> Result<(), Error> {
         while !buf.is_empty() {
@@ -68,10 +85,7 @@ impl<'a> LocalState<'a> {
 impl<'a> Drop for LocalState<'a> {
     fn drop(&mut self) {
         let state = self.state;
-        self.pool
-            .0
-            .run(move |x| x.recycle(state))
-            .expect("Failed to recycle local state");
+        self.pool.recycle(state);
     }
 }
 
@@ -85,13 +99,13 @@ mod tests {
     use super::*;
     #[test]
     fn get_local_state() {
-        let pool = SharedPool::new().expect("Failed to create shared pool");
+        let pool = Pool::new().expect("Failed to create shared pool");
         _ = LocalState::new(&pool).expect("Failed to create local state");
     }
 
     #[test]
     fn fill_local_state() {
-        let pool = SharedPool::new().expect("Failed to create shared pool");
+        let pool = Pool::new().expect("Failed to create shared pool");
         let mut local_state = LocalState::new(&pool).unwrap();
         let mut buf = [0u8; 64];
         let res = local_state.fill(&mut buf, 0);
@@ -101,7 +115,7 @@ mod tests {
 
     #[test]
     fn multi_local_state() {
-        let pool = SharedPool::new().expect("Failed to create shared pool");
+        let pool = Pool::new().expect("Failed to create shared pool");
         let mut states = Vec::new();
         for _ in 0..128 {
             let local_state = LocalState::new(&pool).unwrap();
@@ -117,7 +131,7 @@ mod tests {
 
     #[test]
     fn parallel_local_state() {
-        let pool = SharedPool::new().expect("Failed to create shared pool");
+        let pool = Pool::new().expect("Failed to create shared pool");
         std::thread::scope(|scope| {
             let pool = &pool;
             for _ in 0..16 {
@@ -136,10 +150,9 @@ mod tests {
 
     #[test]
     fn global_state_test() {
-        fn global_pool() -> &'static SharedPool {
-            static GLOBAL_STATE: std::sync::LazyLock<SharedPool> = std::sync::LazyLock::new(|| {
-                SharedPool::new().expect("Failed to create global pool")
-            });
+        fn global_pool() -> &'static Pool {
+            static GLOBAL_STATE: std::sync::LazyLock<Pool> =
+                std::sync::LazyLock::new(|| Pool::new().expect("Failed to create global pool"));
             &GLOBAL_STATE
         }
         fn fill(buf: &mut [u8], flag: c_uint) -> Result<(), Error> {

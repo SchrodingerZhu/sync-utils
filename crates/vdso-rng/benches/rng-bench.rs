@@ -1,11 +1,11 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::cell::RefCell;
-use vdso_rng::{LocalState, SharedPool};
+use vdso_rng::{LocalState, Pool};
 
-fn global_pool() -> &'static SharedPool {
-    static GLOBAL_STATE: std::sync::LazyLock<SharedPool> =
-        std::sync::LazyLock::new(|| SharedPool::new().expect("Failed to create global pool"));
+fn global_pool() -> &'static Pool {
+    static GLOBAL_STATE: std::sync::LazyLock<Pool> =
+        std::sync::LazyLock::new(|| Pool::new().expect("Failed to create global pool"));
     &GLOBAL_STATE
 }
 fn fill_vgetrandom(buf: &mut [u8]) {

@@ -1,6 +1,6 @@
 extern crate std;
 
-use crate::pool::VGetrandomOpaqueParams;
+use crate::config::VGetrandomOpaqueParams;
 use core::ffi::{c_int, c_uint, c_void};
 use core::mem::MaybeUninit;
 pub type VdsoFunc = unsafe extern "C" fn(*mut c_void, usize, c_uint, *mut c_void, usize) -> c_int;
@@ -29,12 +29,18 @@ unsafe extern "C" fn mocked_vgetrandom(
     let udata = unsafe { &mut (*(udata as *mut usize)) };
     let buf_slice: &mut [MaybeUninit<u8>] =
         unsafe { core::slice::from_raw_parts_mut(buf as *mut MaybeUninit<u8>, buf_len) };
+    let mut written = 0;
     for byte in buf_slice.iter_mut() {
         let current = *udata;
         *udata = current.wrapping_add(1);
         byte.write(current as u8);
+        written += 1;
+        // simulate early return
+        if current % 37 == 0 {
+            break;
+        }
     }
-    return buf_len as c_int;
+    return written as c_int;
 }
 
 pub fn get_function_and_page_size() -> Option<(VdsoFunc, usize)> {

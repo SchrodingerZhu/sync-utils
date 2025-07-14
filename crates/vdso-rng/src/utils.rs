@@ -55,12 +55,12 @@ pub fn mmap(size: usize, _mmap_prot: c_uint, _mmap_flags: c_uint) -> Option<NonN
 }
 
 #[cfg(not(miri))]
-pub fn munmap(ptr: NonNull<c_void>, size: usize) {
+pub unsafe fn munmap(ptr: NonNull<c_void>, size: usize) {
     unsafe { raw_syscall!(Sysno::munmap, ptr.as_ptr(), size) };
 }
 
 #[cfg(miri)]
-pub fn munmap(ptr: NonNull<c_void>, size: usize) {
+pub unsafe fn munmap(ptr: NonNull<c_void>, size: usize) {
     extern crate alloc;
     let layout = core::alloc::Layout::from_size_align(size, crate::vdso::PAGE_SIZE)
         .expect("Failed to create layout for munmap");
