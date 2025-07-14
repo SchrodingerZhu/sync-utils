@@ -92,7 +92,7 @@ impl<'a> Drop for LocalState<'a> {
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use std::cell::{LazyCell, RefCell};
+    use std::cell::RefCell;
 
     use alloc::vec::Vec;
 
@@ -157,9 +157,7 @@ mod tests {
         }
         fn fill(buf: &mut [u8], flag: c_uint) -> Result<(), Error> {
             std::thread_local! {
-                static LOCAL_STATE: LazyCell<RefCell<LocalState<'static>>> = LazyCell::new(|| {
-                    RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"))
-                });
+                static LOCAL_STATE: RefCell<LocalState<'static>> = RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"));
             }
             LOCAL_STATE.with(|local_state| {
                 let mut state = local_state.borrow_mut();
