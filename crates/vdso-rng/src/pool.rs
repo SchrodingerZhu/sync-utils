@@ -37,7 +37,7 @@ unsafe impl Send for Ptr {}
 /// - **Fork safety**: After `fork`, the kernel wipes the random states to avoid leaks.
 ///   However, we do **not** guarantee correctness of pool usage across forks.
 pub struct Pool {
-    pub config: Config,
+    pub(crate) config: Config,
     mmaps: Lock<Vec<Ptr>>,
     freelist: SegQueue<Ptr>,
 }
