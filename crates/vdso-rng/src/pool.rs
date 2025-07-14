@@ -79,7 +79,7 @@ impl Pool {
         }
         Ok(())
     }
-    pub fn get(&self) -> Result<Ptr, crate::Error> {
+    pub(crate) fn get(&self) -> Result<Ptr, crate::Error> {
         if let Some(ptr) = self.freelist.pop() {
             return Ok(ptr);
         }
@@ -98,7 +98,7 @@ impl Pool {
             })
             .unwrap_or(Err(crate::Error::PoolPoisoned))
     }
-    pub fn recycle(&self, ptr: Ptr) {
+    pub(crate) fn recycle(&self, ptr: Ptr) {
         self.freelist.push(ptr);
     }
 }
