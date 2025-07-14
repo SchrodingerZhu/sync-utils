@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "lamlock"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "rustix",
@@ -555,6 +555,7 @@ dependencies = [
  "lamlock",
  "linux-raw-sys 0.10.0",
  "rand",
+ "rand_chacha",
  "rayon",
  "rustix",
  "syscalls",
