@@ -1,7 +1,6 @@
-use std::cell::{LazyCell, RefCell};
-
 use criterion::{Criterion, criterion_group, criterion_main};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use std::cell::RefCell;
 use vdso_rng::{LocalState, SharedPool};
 
 fn global_pool() -> &'static SharedPool {
@@ -11,9 +10,8 @@ fn global_pool() -> &'static SharedPool {
 }
 fn fill_vgetrandom(buf: &mut [u8]) {
     thread_local! {
-        static LOCAL_STATE: LazyCell<RefCell<LocalState<'static>>> = LazyCell::new(|| {
-            RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"))
-        });
+        static LOCAL_STATE: RefCell<LocalState<'static>> =
+            RefCell::new(LocalState::new(global_pool()).expect("Failed to create local state"));
     }
     LOCAL_STATE.with(|local_state| {
         let mut state = local_state.borrow_mut();
@@ -36,38 +34,42 @@ fn fill_getrandom(mut buf: &mut [u8]) {
         }
     }
 }
-fn fill_with_thread_rng(buf: &mut [u8]) {
+fn fill_with_rand_chacha20(buf: &mut [u8]) {
     use rand::RngCore;
-    let mut rng = rand::rngs::ThreadRng::default();
-    rng.fill_bytes(buf);
+    use rand::rngs::OsRng;
+    use rand::rngs::ReseedingRng;
+    use rand_chacha::ChaCha20Core;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static TLS_RNG: RefCell<ReseedingRng<ChaCha20Core, OsRng>> = RefCell::new(
+            ReseedingRng::<ChaCha20Core, _>::new(16 * 1024, OsRng).unwrap()
+        );
+    }
+
+    TLS_RNG.with(|rng| {
+        rng.borrow_mut().fill_bytes(buf);
+    });
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     {
-        const REPEAT: usize = 1024; // Number of iterations for each benchmark
         const BYTES: usize = 64 * 1024; // 64 KiB
         let mut group = c.benchmark_group("throughput");
         let mut buf = Box::new([0u8; BYTES]) as Box<[u8]>; // 64KiB
         group.bench_function("rand-fill-64KiB-vgetrandom", |b| {
             b.iter(|| {
-                for _ in 0..REPEAT {
-                    // Fill the buffer with random bytes using vgetrandom
-                    fill_vgetrandom(&mut buf);
-                }
+                fill_vgetrandom(&mut buf);
             });
         });
         group.bench_function("rand-fill-64KiB-getrandom", |b| {
             b.iter(|| {
-                for _ in 0..REPEAT {
-                    fill_getrandom(&mut buf);
-                }
+                fill_getrandom(&mut buf);
             });
         });
-        group.bench_function("rand-fill-64KiB-thread_rng", |b| {
+        group.bench_function("rand-fill-64KiB-rand-chacha20", |b| {
             b.iter(|| {
-                for _ in 0..REPEAT {
-                    fill_with_thread_rng(&mut buf);
-                }
+                fill_with_rand_chacha20(&mut buf);
             });
         });
         group.throughput(criterion::Throughput::Bytes(BYTES as u64));
@@ -92,10 +94,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 });
             });
         });
-        group.bench_function("parallel-fill-1024bytes-thread_rng", |b| {
+        group.bench_function("parallel-fill-1024bytes-rand-chacha20", |b| {
             b.iter(|| {
                 array_of_chunks.par_iter_mut().for_each(|chunk| {
-                    fill_with_thread_rng(chunk);
+                    fill_with_rand_chacha20(chunk);
                 });
             });
         });
