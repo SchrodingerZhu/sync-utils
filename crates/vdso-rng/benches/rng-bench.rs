@@ -80,21 +80,21 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         const CHUNK_SIZE: usize = 8;
         let mut array_of_chunks = vec![[0u8; CHUNK_SIZE]; TOTAL_CHUNKS];
         let mut group = c.benchmark_group("rayon");
-        group.bench_function("parallel-fill-1024bytes-vgetrandom", |b| {
+        group.bench_function("parallel-fill-vgetrandom", |b| {
             b.iter(|| {
                 array_of_chunks.par_iter_mut().for_each(|chunk| {
                     fill_vgetrandom(chunk);
                 });
             });
         });
-        group.bench_function("parallel-fill-1024bytes-getrandom", |b| {
+        group.bench_function("parallel-fill-getrandom", |b| {
             b.iter(|| {
                 array_of_chunks.par_iter_mut().for_each(|chunk| {
                     fill_getrandom(chunk);
                 });
             });
         });
-        group.bench_function("parallel-fill-1024bytes-rand-chacha20", |b| {
+        group.bench_function("parallel-fill-rand-chacha20", |b| {
             b.iter(|| {
                 array_of_chunks.par_iter_mut().for_each(|chunk| {
                     fill_with_rand_chacha20(chunk);
