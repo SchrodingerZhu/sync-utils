@@ -233,7 +233,7 @@ impl ElfShdrArray {
 }
 
 pub fn get_function_and_page_size() -> Option<(VdsoFunc, usize)> {
-    let auxv = crate::auxv::MMappedAuxv::new()?;
+    let auxv = crate::auxv::Auxv::new()?;
     let mut func = None;
     let mut page_size = None;
     for entry in auxv.iter() {

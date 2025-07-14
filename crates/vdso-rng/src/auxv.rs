@@ -1,12 +1,9 @@
-use core::{
-    ffi::{c_int, c_ulong, c_void},
-    mem::{MaybeUninit, size_of},
-    ptr::NonNull,
-};
+use core::{ffi::c_ulong, mem::size_of};
 
-use linux_raw_sys::general::{AT_NULL, MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE};
+use alloc::boxed::Box;
+use linux_raw_sys::general::AT_NULL;
 use linux_raw_sys::prctl::PR_GET_AUXV;
-use syscalls::{Sysno, raw_syscall, syscall};
+use syscalls::{Sysno, syscall};
 
 // Maximum number of entries in the auxiliary vector
 // It is a rough guess based on typical usage, but can vary by system.
@@ -21,38 +18,24 @@ pub struct AuxvEntry {
     pub value: c_ulong,
 }
 
-pub struct MMappedAuxv {
-    ptr: NonNull<MaybeUninit<[AuxvEntry; MAX_AUXV_ENTRIES]>>,
-}
+#[repr(transparent)]
+pub struct Auxv(Box<[AuxvEntry; MAX_AUXV_ENTRIES]>);
 
-impl MMappedAuxv {
+impl Auxv {
     pub fn new() -> Option<Self> {
+        let boxed = Box::new(
+            [AuxvEntry {
+                key: AT_NULL as c_ulong,
+                value: AT_NULL as c_ulong,
+            }; MAX_AUXV_ENTRIES],
+        );
         unsafe {
-            let mmap = raw_syscall!(
-                Sysno::mmap,
-                core::ptr::null_mut::<c_void>(),
-                MMAP_SIZE,
-                PROT_READ | PROT_WRITE,
-                MAP_PRIVATE | MAP_ANONYMOUS,
-                -1 as c_int,
-                0
-            );
-            if mmap as isize == -1 {
-                return None;
-            }
-            let mut ptr = NonNull::new(mmap as *mut MaybeUninit<[AuxvEntry; MAX_AUXV_ENTRIES]>)?;
-            ptr.as_mut().write(
-                [AuxvEntry {
-                    key: AT_NULL as c_ulong,
-                    value: AT_NULL as c_ulong,
-                }; MAX_AUXV_ENTRIES],
-            );
-            syscall!(Sysno::prctl, PR_GET_AUXV, ptr.as_ptr(), MMAP_SIZE, 0, 0).ok()?;
-            Some(MMappedAuxv { ptr })
+            syscall!(Sysno::prctl, PR_GET_AUXV, boxed.as_ptr(), MMAP_SIZE, 0, 0).ok()?;
         }
+        Some(Auxv(boxed))
     }
     pub fn iter(&'_ self) -> AuxvIter<'_> {
-        unsafe { AuxvIter::new(self.ptr.as_ref().assume_init_ref()) }
+        AuxvIter::new(self.0.as_ref())
     }
 }
 
@@ -80,14 +63,6 @@ impl<'a> Iterator for AuxvIter<'a> {
     }
 }
 
-impl Drop for MMappedAuxv {
-    fn drop(&mut self) {
-        unsafe {
-            raw_syscall!(Sysno::munmap, self.ptr.as_ptr() as *mut c_void, MMAP_SIZE);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use linux_raw_sys::general::AT_RANDOM;
@@ -98,7 +73,7 @@ mod tests {
         if cfg!(miri) {
             return;
         }
-        let auxv = MMappedAuxv::new();
+        let auxv = Auxv::new();
         assert!(auxv.is_some(), "Failed to mmap auxiliary vector");
     }
 
@@ -107,7 +82,7 @@ mod tests {
         if cfg!(miri) {
             return;
         }
-        let auxv = MMappedAuxv::new().expect("Failed to mmap auxiliary vector");
+        let auxv = Auxv::new().expect("Failed to mmap auxiliary vector");
         assert!(
             auxv.iter().any(|x| x.key == AT_RANDOM as c_ulong),
             "AT_RANDOM not found in auxiliary vector"

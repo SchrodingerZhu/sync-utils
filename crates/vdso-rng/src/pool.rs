@@ -12,6 +12,30 @@ pub struct Ptr(pub(crate) NonNull<c_void>);
 
 unsafe impl Send for Ptr {}
 
+/// A shared state block pool for `vDSO`-based `getrandom` operations.
+///
+/// This pool maintains a free list of opaque state blocks. Threads can rent a block
+/// from the pool and use it to generate random bytes. The pool is [`Sync`] and supports
+/// concurrent access. Under debug assertions, [`Pool::drop`] detects potential misuse,
+/// such as double drops.
+///
+/// The pool itself offers only [`Pool::new`]. To interact with the pool, see [`crate::LocalState`],
+/// which wraps individual state blocks for random generation.
+///
+/// ```rust
+/// use vdso_rng::Pool;
+/// let _pool = Pool::new().unwrap();
+/// ```
+///
+/// ### Memory Behavior
+/// The pool grows monotonically with system parallelism. Opaque state blocks are stored
+/// in memory-mapped pages that are not backed by swap. When the system is under memory pressure,
+/// the OS may reclaim these pages, which is generally safe.
+///
+/// ## Safety
+/// - **Not async-signal-safe**: Using the pool in signal handlers may cause deadlocks.
+/// - **Fork safety**: After `fork`, the kernel wipes the random states to avoid leaks.
+///   However, we do **not** guarantee correctness of pool usage across forks.
 pub struct Pool {
     pub config: Config,
     mmaps: Lock<Vec<Ptr>>,
