@@ -2,7 +2,14 @@
 name = "vdso-rng"
 version = "0.1.0"
 edition = "2024"
-
+authors = ["schrodingerzhu <yifanzhu@rochester.edu>"]
+description = "A Rust wrapper around the Linux vDSO random number generator."
+license = "MIT OR Apache-2.0"
+keywords = ["vDSO", "linux", "random", "synchronization"]
+categories = ["concurrency", "data-structures", "no-std"]
+homepage = "https://github.com/schrodingerzhu/useless"
+repository = "https://github.com/schrodingerzhu/useless"
+readme = "README.md"
 
 [dependencies]
 linux-raw-sys = { version = "0.10.0", default-features = false, features = [
@@ -15,7 +22,7 @@ linux-raw-sys = { version = "0.10.0", default-features = false, features = [
     "errno",
 ] }
 syscalls = { version = "0.6.18", default-features = false }
-lamlock = { path = "../lamlock" }
+lamlock = { path = "../lamlock", version = "0.2.0" }
 crossbeam-queue = { version = "0.3.12", default-features = false, features = [
     "alloc",
 ] }

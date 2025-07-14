@@ -37,18 +37,20 @@ fn fill(buf: &mut [u8], flag: u32) -> Result<(), Error> {
     })
 }
 
-std::thread::scope(|scope| {
-    for _ in 0..16 {
-        scope.spawn(|| {
-            for _ in 0..16 {
-                let mut buf = [0u8; 64];
-                let res = fill(&mut buf, 0);
-                assert!(res.is_ok(), "Failed to fill global state: {:?}", res);
-                assert!(buf.iter().any(|&x| x != 0), "Buffer should not be empty");
-            }
-        });
-    }
-});
+fn main() {
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            scope.spawn(|| {
+                for _ in 0..16 {
+                    let mut buf = [0u8; 64];
+                    let res = fill(&mut buf, 0);
+                    assert!(res.is_ok(), "Failed to fill global state: {:?}", res);
+                    assert!(buf.iter().any(|&x| x != 0), "Buffer should not be empty");
+                }
+            });
+        }
+    });
+}
 ```
 
 ## Safety
