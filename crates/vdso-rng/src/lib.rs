@@ -168,16 +168,15 @@ mod tests {
         }
 
         std::thread::scope(|scope| {
-            let mut handles = Vec::new();
             for _ in 0..16 {
-                handles.push(scope.spawn(|| {
+                scope.spawn(|| {
                     for _ in 0..16 {
                         let mut buf = [0u8; 64];
                         let res = fill(&mut buf, 0);
                         assert!(res.is_ok(), "Failed to fill global state: {:?}", res);
                         assert!(buf.iter().any(|&x| x != 0), "Buffer should not be empty");
                     }
-                }));
+                });
             }
         });
     }
