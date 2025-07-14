@@ -5,10 +5,20 @@ edition = "2024"
 
 
 [dependencies]
-linux-raw-sys = { version = "0.10.0", default-features = false, features = ["core", "elf", "elf_uapi", "general", "no_std", "prctl", "errno"] }
+linux-raw-sys = { version = "0.10.0", default-features = false, features = [
+    "core",
+    "elf",
+    "elf_uapi",
+    "general",
+    "no_std",
+    "prctl",
+    "errno",
+] }
 syscalls = { version = "0.6.18", default-features = false }
-lamlock = { path = "../lamlock"}
-crossbeam-queue = { version = "0.3.12", default-features = false, features = ["alloc"] }
+lamlock = { path = "../lamlock" }
+crossbeam-queue = { version = "0.3.12", default-features = false, features = [
+    "alloc",
+] }
 
 [[bench]]
 name = "rng-bench"
