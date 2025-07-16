@@ -2,18 +2,21 @@ use alloc::vec::Vec;
 
 use crate::{
     Field, Flex, Rigid,
-    obj::{Header, Object},
+    obj::{Header, Object, Status},
     pointer::Nullable,
 };
 use core::ptr::NonNull;
 pub struct VTable {
-    pub drop: unsafe fn(NonNull<u8>),
-    pub scan: unsafe fn(&mut Scanner, NonNull<u8>),
+    pub(crate) drop: unsafe fn(NonNull<Header>),
+    pub(crate) scan: unsafe fn(&mut Scanner, NonNull<Header>),
 }
 
 pub(crate) enum ScannerImpl<'a> {
     Freeze(&'a mut Vec<NonNull<Header>>),
-    Dispose,
+    Dispose {
+        scc: &'a mut Vec<NonNull<Header>>,
+        dfs: &'a mut Vec<NonNull<Header>>,
+    },
 }
 
 pub struct Scanner<'a>(ScannerImpl<'a>);
@@ -22,26 +25,45 @@ impl<'a> Scanner<'a> {
     pub(crate) fn freeze(worklist: &'a mut Vec<NonNull<Header>>) -> Self {
         Self(ScannerImpl::Freeze(worklist))
     }
+    pub(crate) fn dispose(
+        scc: &'a mut Vec<NonNull<Header>>,
+        dfs: &'a mut Vec<NonNull<Header>>,
+    ) -> Self {
+        Self(ScannerImpl::Dispose { scc, dfs })
+    }
     pub fn scan_nested<T: Managable>(&mut self, value: &T) {
         unsafe {
             value.scan_nested(self);
         }
     }
     pub fn scan_field<T: Managable>(&mut self, field: &Field<T>) {
-        self.scan_object(unsafe { field.object() });
+        self.scan_object(field.object());
     }
     pub fn scan_nullable<T: Managable>(&mut self, nullable: &Nullable<T>) {
         if let Some(object) = unsafe { nullable.object() } {
             self.scan_object(object);
         }
     }
-    fn scan_object<T: Managable>(&mut self, object: &Object<T>) {
+    fn scan_object<T: Managable>(&mut self, object: NonNull<Object<T>>) {
         match &mut self.0 {
             ScannerImpl::Freeze(worklist) => {
-                Header::freeze_with_worklist(object.as_header(), *worklist);
+                Header::freeze_with_worklist(object.cast(), *worklist);
             }
-            ScannerImpl::Dispose => {
-                todo!("Implement dispose logic for Scanner");
+            ScannerImpl::Dispose { scc, dfs } => {
+                let n = Header::find(object.cast());
+                match unsafe { n.as_ref().status.get() } {
+                    Status::InProgress => {
+                        if object.cast() != n {
+                            Header::add_stack(object.cast(), scc);
+                        }
+                    }
+                    Status::Rc(_) => {
+                        if unsafe { Header::decref(n) } {
+                            Header::add_stack(n, dfs);
+                        }
+                    }
+                    _ => unsafe { core::hint::unreachable_unchecked() },
+                }
             }
         }
     }
@@ -49,9 +71,16 @@ impl<'a> Scanner<'a> {
 
 pub unsafe trait Managable: Sized {
     const VTABLE: VTable = VTable {
-        drop: |x: NonNull<u8>| unsafe { x.cast::<Self>().drop_in_place() },
-        scan: |scanner: &mut Scanner, ptr: NonNull<u8>| unsafe {
-            ptr.cast::<Self>().as_ref().scan_nested(scanner)
+        drop: |x: NonNull<Header>| unsafe {
+            let object = x.cast::<Object<Self>>();
+            let boxed = alloc::boxed::Box::from_raw(object.as_ptr());
+            drop(boxed);
+        },
+        scan: |scanner: &mut Scanner, ptr: NonNull<Header>| unsafe {
+            ptr.cast::<Object<Self>>()
+                .as_ref()
+                .value
+                .scan_nested(scanner)
         },
     };
     unsafe fn scan_nested(&self, _: &mut Scanner) {}
@@ -83,6 +112,11 @@ unsafe impl<T: Managable, const N: usize> Managable for [T; N] {
             scanner.scan_nested(item);
         });
     }
+}
+
+// Rigid is already an RC pointer, so there is nothing to do here.
+unsafe impl<T: Managable> Managable for Rigid<T> {
+    unsafe fn scan_nested(&self, _: &mut Scanner) {}
 }
 
 // unsafe impl<T: Scannable + ?Sized> Scannable for alloc::boxed::Box<T> {

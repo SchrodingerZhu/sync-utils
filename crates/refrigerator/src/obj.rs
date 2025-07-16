@@ -1,8 +1,8 @@
-use core::{cell::Cell, num::NonZero, ptr::NonNull};
+use core::{cell::Cell, mem::ManuallyDrop, num::NonZero, ptr::NonNull};
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
-use crate::{Managable, Scanner, VTable};
+use crate::{Managable, Scanner, scanner::VTable};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Status {
@@ -20,8 +20,8 @@ pub(crate) struct Header {
 
 #[repr(C)]
 pub(crate) struct Object<T> {
-    header: Header,
-    value: T,
+    pub(crate) header: Header,
+    pub(crate) value: T,
 }
 
 impl Header {
@@ -37,6 +37,7 @@ impl Header {
             this_ref
                 .status
                 .set(Status::Rc(unsafe { NonZero::new_unchecked(rc.get() + 1) }));
+            return;
         }
         unsafe { core::hint::unreachable_unchecked() };
     }
@@ -101,7 +102,7 @@ impl Header {
                 worklist.push(this);
                 let mut scanner = Scanner::freeze(worklist);
                 let vtable = this.as_ref().vtable;
-                (vtable.scan)(&mut scanner, this.cast::<u8>());
+                (vtable.scan)(&mut scanner, this);
                 if worklist.last().copied() == Some(this) {
                     worklist.pop();
                 }
@@ -131,16 +132,39 @@ impl Header {
         let mut worklist = Vec::new();
         Self::freeze_with_worklist(this, &mut worklist);
     }
+    pub fn add_stack(this: NonNull<Self>, stack: &mut Vec<NonNull<Self>>) {
+        stack.push(this);
+        unsafe { this.as_ref().status.set(Status::InProgress) };
+    }
+    pub fn dispose(this: NonNull<Self>) {
+        let mut dfs = Vec::new();
+        let mut scc = Vec::new();
+        let mut freelist = Vec::new();
+        Self::add_stack(this, &mut dfs);
+        while let Some(d) = dfs.pop() {
+            scc.push(d);
+            while let Some(s) = scc.pop() {
+                freelist.push(s);
+                let mut scanner = Scanner::dispose(&mut scc, &mut dfs);
+                let vtable = unsafe { s.as_ref().vtable };
+                unsafe { (vtable.scan)(&mut scanner, s) };
+            }
+        }
+        while let Some(f) = freelist.pop() {
+            unsafe {
+                let vtable = f.as_ref().vtable;
+                (vtable.drop)(f);
+            };
+        }
+    }
 }
 
 impl<T: Managable> Object<T> {
-    pub fn new(value: T) -> Self {
-        Self {
+    pub fn alloc(value: T) -> NonNull<Self> {
+        let obj = Box::new(Self {
             header: Header::new(&T::VTABLE),
             value,
-        }
-    }
-    pub fn as_header(&self) -> NonNull<Header> {
-        NonNull::from(self).cast()
+        });
+        unsafe { NonNull::new_unchecked(Box::into_raw(obj)) }
     }
 }

@@ -10,4 +10,4 @@ mod scanner;
 type PhantomInvariantLifetime<'a> = core::marker::PhantomData<*mut &'a ()>;
 
 pub use pointer::{Field, Flex, Nullable, Rigid};
-pub use scanner::{Managable, Scanner, VTable};
+pub use scanner::{Managable, Scanner};
