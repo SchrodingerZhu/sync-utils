@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use crate::{
-    Field, Flex, Rigid,
+    Field, Rigid,
     obj::{Header, Object, Status},
     pointer::Nullable,
 };
@@ -47,7 +47,7 @@ impl<'a> Scanner<'a> {
     fn scan_object<T: Managable>(&mut self, object: NonNull<Object<T>>) {
         match &mut self.0 {
             ScannerImpl::Freeze(worklist) => {
-                Header::freeze_with_worklist(object.cast(), *worklist);
+                Header::freeze_with_worklist(object.cast(), worklist);
             }
             ScannerImpl::Dispose { scc, dfs } => {
                 let n = Header::find(object.cast());
@@ -119,34 +119,28 @@ unsafe impl<T: Managable> Managable for Rigid<T> {
     unsafe fn scan_nested(&self, _: &mut Scanner) {}
 }
 
-// unsafe impl<T: Scannable + ?Sized> Scannable for alloc::boxed::Box<T> {
-//     type Rigid = alloc::boxed::Box<T::Rigid>;
-//     type Flex = alloc::boxed::Box<T::Flex>;
-//     fn scan(&self, scanner: &mut Scanner) {
-//         scanner.scan(self.as_ref());
-//     }
-// }
+unsafe impl<T: Managable> Managable for alloc::boxed::Box<T> {
+    unsafe fn scan_nested(&self, scanner: &mut Scanner) {
+        scanner.scan_nested(&**self);
+    }
+}
 
-// unsafe impl<T: Scannable + ?Sized> Scannable for alloc::vec::Vec<T> {
-//     type Rigid = alloc::vec::Vec<T::Rigid>;
-//     type Flex = alloc::vec::Vec<T::Flex>;
-//     fn scan(&self, scanner: &mut Scanner) {
-//         self.iter().for_each(|item| scanner.scan(item));
-//     }
-// }
+unsafe impl<T: Managable> Managable for alloc::vec::Vec<T> {
+    unsafe fn scan_nested(&self, scanner: &mut Scanner) {
+        self.iter().for_each(|item| {
+            scanner.scan_nested(item);
+        });
+    }
+}
 
-// unsafe impl<T: Scannable + ?Sized> Scannable for alloc::rc::Rc<T> {
-//     type Rigid = alloc::rc::Rc<T::Rigid>;
-//     type Flex = alloc::rc::Rc<T::Flex>;
-//     fn scan(&self, scanner: &mut Scanner) {
-//         scanner.scan(self.as_ref());
-//     }
-// }
+unsafe impl<T: Managable> Managable for alloc::rc::Rc<T> {
+    unsafe fn scan_nested(&self, scanner: &mut Scanner) {
+        scanner.scan_nested(&**self);
+    }
+}
 
-// unsafe impl<T: Scannable> Scannable for Option<T> {
-//     type Rigid = Option<T::Rigid>;
-//     type Flex = Option<T::Flex>;
-//     fn scan(&self, scanner: &mut Scanner) {
-//         self.iter().for_each(|item| scanner.scan(item));
-//     }
-// }
+unsafe impl<T: Managable> Managable for Option<T> {
+    unsafe fn scan_nested(&self, scanner: &mut Scanner) {
+        self.iter().for_each(|item| scanner.scan_nested(item));
+    }
+}

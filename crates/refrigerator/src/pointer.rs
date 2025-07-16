@@ -1,14 +1,16 @@
-use core::{cell::Cell, ptr::NonNull};
+use core::{cell::Cell, ops::Deref, ptr::NonNull};
 
 use crate::{
     Managable, PhantomInvariantLifetime,
     obj::{Header, Object},
+    region::Region,
 };
 
 #[repr(transparent)]
-pub struct Flex<'a, T> {
+#[derive(Clone, Copy)]
+pub struct Flex<'a, T: Managable> {
     inner: NonNull<Object<T>>,
-    _marker: PhantomInvariantLifetime<'a>,
+    marker: PhantomInvariantLifetime<'a>,
 }
 
 #[repr(transparent)]
@@ -38,11 +40,11 @@ impl<T: Managable> Drop for Rigid<T> {
 }
 
 #[repr(transparent)]
-pub struct Field<T> {
+pub struct Field<T: Managable> {
     inner: Cell<NonNull<Object<T>>>,
 }
 
-impl<T> Field<T> {
+impl<T: Managable> Field<T> {
     pub(crate) fn new(inner: NonNull<Object<T>>) -> Self {
         Self {
             inner: Cell::new(inner),
@@ -54,11 +56,11 @@ impl<T> Field<T> {
 }
 
 #[repr(transparent)]
-pub struct Nullable<T> {
+pub struct Nullable<T: Managable> {
     inner: Cell<Option<NonNull<Object<T>>>>,
 }
 
-impl<T> Nullable<T> {
+impl<T: Managable> Nullable<T> {
     pub(crate) fn new_nonnull(inner: NonNull<Object<T>>) -> Self {
         Self {
             inner: Cell::new(Some(inner)),
@@ -72,6 +74,108 @@ impl<T> Nullable<T> {
     pub(crate) unsafe fn object(&self) -> Option<NonNull<Object<T>>> {
         let inner = self.inner.get();
         inner.as_ref().copied()
+    }
+}
+
+impl<'a, T: Managable> Flex<'a, T> {
+    pub fn new(inner: T, token: &mut Region<'a>) -> Flex<'a, T> {
+        let alloc = Object::alloc(inner);
+        token.allocations.push(alloc.cast());
+        Self {
+            inner: alloc,
+            marker: token.marker,
+        }
+    }
+
+    pub fn set<F, U>(&self, f: F, val: Flex<'a, U>, _token: &Region<'a>)
+    where
+        F: FnOnce(&T) -> &Field<U>,
+        U: Managable,
+    {
+        let field = f(unsafe { &self.inner.as_ref().value });
+        field.inner.set(val.inner);
+    }
+
+    pub fn set_opt<F, U>(&self, f: F, val: Option<Flex<'a, U>>, _token: &Region<'a>)
+    where
+        F: FnOnce(&T) -> &Nullable<U>,
+        U: Managable,
+    {
+        let nullable = f(unsafe { &self.inner.as_ref().value });
+        nullable.inner.set(val.map(|v| v.inner));
+    }
+
+    pub fn take_opt<F, U>(&self, f: F, token: &Region<'a>) -> Option<Flex<'a, U>>
+    where
+        F: FnOnce(&T) -> &Nullable<U>,
+        U: Managable,
+    {
+        let nullable = f(unsafe { &self.inner.as_ref().value });
+        nullable.inner.take().map(|inner| Flex {
+            inner,
+            marker: token.marker,
+        })
+    }
+
+    pub fn replace_opt<F, U>(
+        &self,
+        f: F,
+        val: Flex<'a, U>,
+        _token: &Region<'a>,
+    ) -> Option<Flex<'a, U>>
+    where
+        F: FnOnce(&T) -> &Nullable<U>,
+        U: Managable,
+    {
+        let nullable = f(unsafe { &self.inner.as_ref().value });
+        nullable.inner.replace(Some(val.inner)).map(|inner| Flex {
+            inner,
+            marker: self.marker,
+        })
+    }
+
+    pub(crate) unsafe fn into_rigid(self) -> Rigid<T> {
+        Header::freeze(self.inner.cast());
+        Rigid { inner: self.inner }
+    }
+
+    pub fn into_field(self, _token: &Region<'a>) -> Field<T> {
+        let field = Field::new(self.inner);
+        field
+    }
+    pub fn into_nullable(self, _token: &Region<'a>) -> Nullable<T> {
+        let nullable = Nullable::new_nonnull(self.inner);
+        nullable
+    }
+}
+
+impl<'a, T: Managable> Deref for Flex<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &self.inner.as_ref().value }
+    }
+}
+
+impl<T: Managable> Deref for Rigid<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &self.inner.as_ref().value }
+    }
+}
+
+impl<T: Managable> Deref for Field<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &self.inner.get().as_ref().value }
+    }
+}
+
+impl<T: Managable> Nullable<T> {
+    pub fn as_ref(&self) -> Option<&T> {
+        self.inner.get().map(|ptr| unsafe { &ptr.as_ref().value })
     }
 }
 
@@ -190,5 +294,20 @@ mod tests {
         let header = list.cast();
         Header::freeze(header);
         let _ = Rigid { inner: list };
+    }
+
+    #[derive(Managable)]
+    struct Nested<T: Managable>(Cyclic<T>);
+
+    #[test]
+    fn test_plainly_nested_cyclic() {
+        let test = Object::alloc(Nested(Cyclic(
+            42,
+            Nullable::new_null(),
+            Nullable::new_null(),
+        )));
+        let header = test.cast();
+        Header::freeze(header);
+        let _ = Rigid { inner: test };
     }
 }

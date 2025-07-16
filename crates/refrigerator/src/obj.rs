@@ -1,4 +1,4 @@
-use core::{cell::Cell, mem::ManuallyDrop, num::NonZero, ptr::NonNull};
+use core::{cell::Cell, num::NonZero, ptr::NonNull};
 
 use alloc::{boxed::Box, vec::Vec};
 
@@ -155,6 +155,14 @@ impl Header {
                 let vtable = f.as_ref().vtable;
                 (vtable.drop)(f);
             };
+        }
+    }
+    pub fn drop_unmarked(this: NonNull<Self>) {
+        if matches!(unsafe { this.as_ref().status.get() }, Status::Unmarked) {
+            unsafe {
+                let vtable = this.as_ref().vtable;
+                (vtable.drop)(this);
+            }
         }
     }
 }
